@@ -1,0 +1,136 @@
+name: construction-superintendent
+version: "1.0.0"
+description: >
+  An OpenEnv-compliant environment where an AI agent acts as an autonomous
+  construction site superintendent. The agent manages a real project schedule
+  modelled as a directed acyclic graph (DAG) of tasks, responds to disruptions
+  (weather delays, material shortages, equipment failures, labour shortages),
+  and must minimise total project delay and cost overrun.
+
+domain: scheduling
+tags:
+  - openenv
+  - construction
+  - scheduling
+  - real-world
+  - resource-management
+  - multi-task
+
+task_levels:
+  - id: easy
+    description: "5-task linear residential build, 1 weather disruption. Baseline score for simple heuristic: ~0.70"
+    difficulty: easy
+    max_steps: 15
+    expected_score_random: 0.30
+    expected_score_heuristic: 0.70
+    expected_score_frontier: 0.90
+
+  - id: medium
+    description: "8-task commercial build, parallel MEP tracks, 3 disruptions. Requires prioritisation."
+    difficulty: medium
+    max_steps: 25
+    expected_score_random: 0.20
+    expected_score_heuristic: 0.55
+    expected_score_frontier: 0.80
+
+  - id: hard
+    description: "10-task complex mixed-use project, 5 disruptions, tight budget. Challenges frontier models."
+    difficulty: hard
+    max_steps: 35
+    expected_score_random: 0.10
+    expected_score_heuristic: 0.40
+    expected_score_frontier: 0.70
+
+observation_space:
+  type: object
+  description: "Full project state including task DAG status, active disruptions, and financial metrics."
+  fields:
+    current_day: integer
+    episode_step: integer
+    task_level: string
+    tasks:
+      type: array
+      item_fields:
+        id: string
+        name: string
+        original_duration: integer
+        current_duration: integer
+        current_start_day: integer
+        current_end_day: integer
+        status: "enum[pending, in_progress, completed, disrupted, blocked]"
+        dependencies: "array[string]"
+        is_on_critical_path: boolean
+        delay_from_original: integer
+        resources: integer
+        cost_per_day: float
+        progress_pct: float
+    active_disruptions:
+      type: array
+      item_fields:
+        id: string
+        type: "enum[weather, material_shortage, equipment_failure, labour_shortage]"
+        affected_task_id: string
+        remaining_delay_days: integer
+        description: string
+    metrics:
+      type: object
+      fields:
+        original_end_day: integer
+        current_projected_end_day: integer
+        delay_days: integer
+        budget_total: float
+        budget_used: float
+        budget_remaining: float
+        tasks_completed: integer
+        tasks_total: integer
+        disruptions_encountered: integer
+        disruptions_resolved: integer
+
+action_space:
+  type: object
+  description: "One scheduling decision per step."
+  fields:
+    action_type: "enum[expedite_task, delay_task, reassign_resources, noop]"
+    task_id: "string (optional)"
+    target_task_id: "string (optional, for reassign_resources)"
+    days: "integer 1-30 (optional)"
+
+reward:
+  type: dense
+  range: [-100, 100]
+  description: >
+    Dense reward signal at each step.
+    Positive: task completion (+5), disruption resolution (+3), project completion (+50),
+              on-time project bonus (+30).
+    Negative: delay penalty (-2 per day), cost penalty (-0.5 per $1k overrun),
+              budget overrun (-20), invalid action (-1).
+
+episode:
+  termination: "All tasks completed OR max_steps reached."
+  max_steps_easy: 15
+  max_steps_medium: 25
+  max_steps_hard: 35
+
+endpoints:
+  health:   "GET  /"
+  reset:    "POST /reset"
+  step:     "POST /step"
+  state:    "GET  /state"
+  grade:    "POST /grade"
+  tasks:    "GET  /tasks"
+
+inference:
+  script: inference.py
+  required_env_vars:
+    API_BASE_URL: "LLM API endpoint"
+    MODEL_NAME: "Model identifier"
+    HF_TOKEN: "Hugging Face / API key"
+  runtime_limit_minutes: 20
+  hardware: "vcpu=2, memory=8gb"
+
+authors:
+  - name: "Team Cockroach"
+    members:
+      - "Mayank Vaishya"
+      - "Harsh Pundir"
+      - "Dhruv"

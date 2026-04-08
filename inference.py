@@ -68,7 +68,7 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
 def action_to_str(action: Action) -> str:
     """Compact single-line JSON for the [STEP] action field."""
     return json.dumps(
-        {k: v for k, v in action.dict().items() if v is not None},
+        {k: v for k, v in action.model_dump().items() if v is not None},
         separators=(',', ':')
     )
 

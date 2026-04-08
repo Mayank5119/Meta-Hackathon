@@ -1,117 +1,98 @@
 """
-Critical Path Method (CPM) scheduler for the construction environment.
-Computes earliest-start times, latest-start times, and the critical path.
+Critical Path Method (CPM) scheduler.
+
+Calculates start_day, end_day, and is_on_critical_path for a DAG of TaskNodes.
+Handles forward pass (early start/finish) and backward pass (late start/finish).
 """
 
-from __future__ import annotations
-
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set
 
 from env.project import TaskNode
 
-
-def topological_sort(tasks: Dict[str, TaskNode]) -> List[str]:
-    """Kahn's algorithm — returns tasks in dependency order."""
-    in_degree: Dict[str, int] = {tid: 0 for tid in tasks}
-    for task in tasks.values():
-        for dep in task.dependencies:
-            in_degree[task.id] += 1
-
-    queue = [tid for tid, deg in in_degree.items() if deg == 0]
-    result: List[str] = []
-
-    while queue:
-        queue.sort()          # deterministic ordering
-        current = queue.pop(0)
-        result.append(current)
-        for task in tasks.values():
-            if current in task.dependencies:
-                in_degree[task.id] -= 1
-                if in_degree[task.id] == 0:
-                    queue.append(task.id)
-
-    if len(result) != len(tasks):
-        raise ValueError("Cycle detected in task dependency graph.")
-
-    return result
-
-
-def compute_early_schedule(tasks: Dict[str, TaskNode]) -> Dict[str, Tuple[int, int]]:
-    """
-    Forward pass: compute Earliest Start (ES) and Earliest Finish (EF) for each task.
-    Returns {task_id: (early_start, early_finish)}.
-    """
-    order = topological_sort(tasks)
-    es: Dict[str, int] = {}
-    ef: Dict[str, int] = {}
-
-    for tid in order:
-        task = tasks[tid]
-        if not task.dependencies:
-            es[tid] = 0
-        else:
-            es[tid] = max(ef[dep] for dep in task.dependencies)
-        ef[tid] = es[tid] + task.current_duration()
-
-    return {tid: (es[tid], ef[tid]) for tid in tasks}
-
-
-def compute_late_schedule(
-    tasks: Dict[str, TaskNode],
-    project_duration: int,
-    early: Dict[str, Tuple[int, int]],
-) -> Dict[str, Tuple[int, int]]:
-    """
-    Backward pass: compute Latest Start (LS) and Latest Finish (LF).
-    Returns {task_id: (late_start, late_finish)}.
-    """
-    order = topological_sort(tasks)
-    lf: Dict[str, int] = {}
-    ls: Dict[str, int] = {}
-
-    for tid in reversed(order):
-        task = tasks[tid]
-        successors = [
-            t for t in tasks.values() if tid in t.dependencies
-        ]
-        if not successors:
-            lf[tid] = project_duration
-        else:
-            lf[tid] = min(ls[s.id] for s in successors)
-        ls[tid] = lf[tid] - task.current_duration()
-
-    return {tid: (ls[tid], lf[tid]) for tid in tasks}
-
-
-def find_critical_path(tasks: Dict[str, TaskNode]) -> Set[str]:
-    """
-    Returns the set of task IDs on the critical path (float == 0).
-    """
-    early = compute_early_schedule(tasks)
-    project_duration = max(ef for _, ef in early.values())
-    late = compute_late_schedule(tasks, project_duration, early)
-
-    critical: Set[str] = set()
-    for tid in tasks:
-        total_float = late[tid][0] - early[tid][0]
-        if total_float == 0:
-            critical.add(tid)
-
-    return critical
-
-
 def apply_schedule(tasks: Dict[str, TaskNode]) -> int:
     """
-    Apply computed earliest-start schedule to all tasks.
-    Updates task.start_day, task.end_day, task.is_on_critical_path.
-    Returns projected project end day.
+    Apply CPM to the task dictionary in-place.
+    Updates start_day, end_day, and is_on_critical_path for all tasks.
+    Returns the final projected end day of the project.
     """
-    early = compute_early_schedule(tasks)
-    critical = find_critical_path(tasks)
+    if not tasks:
+        return 0
 
+    # 1. Forward Pass (Calculate Early Start and Early Finish)
+    # Reset computed fields
+    for task in tasks.values():
+        task.start_day = 0
+        task.end_day = 0
+        task.is_on_critical_path = False
+
+    resolved: Set[str] = set()
+    pending = set(tasks.keys())
+    
+    # Iteratively resolve tasks where all dependencies are already resolved
+    while pending:
+        progress_made = False
+        for tid in list(pending):
+            task = tasks[tid]
+            
+            if all(dep in resolved for dep in task.dependencies):
+                # Calculate start_day (max of all dependency end_days)
+                if not task.dependencies:
+                    task.start_day = 0
+                else:
+                    task.start_day = max(tasks[dep].end_day for dep in task.dependencies)
+                    
+                task.end_day = task.start_day + task.current_duration()
+                resolved.add(tid)
+                pending.remove(tid)
+                progress_made = True
+                
+        if not progress_made and pending:
+            # Circular dependency detected
+            raise ValueError(f"Circular dependency detected in tasks: {pending}")
+
+    # The project end day is the maximum end_day of all tasks
+    project_end_day = max((task.end_day for task in tasks.values()), default=0)
+
+    # 2. Backward Pass (Calculate Late Start, Late Finish, and Critical Path)
+    # First, map which tasks act as dependencies for others
+    is_dependency_for: Dict[str, List[str]] = {tid: [] for tid in tasks}
     for tid, task in tasks.items():
-        task.start_day = early[tid][0]
-        task.end_day = early[tid][1]
-        task.is_on_critical_path = tid in critical
+        for dep in task.dependencies:
+            if dep in is_dependency_for:
+                is_dependency_for[dep].append(tid)
 
-    return max(ef for _, ef in early.values())
+    late_finish: Dict[str, int] = {}
+    late_start: Dict[str, int] = {}
+    
+    resolved_backward: Set[str] = set()
+    pending_backward = set(tasks.keys())
+    
+    while pending_backward:
+        progress_made = False
+        for tid in list(pending_backward):
+            dependent_tasks = is_dependency_for[tid]
+            
+            # Can process if all tasks that depend on THIS task are already processed
+            if all(dep in resolved_backward for dep in dependent_tasks):
+                if not dependent_tasks:
+                    # Terminal node
+                    lf = project_end_day
+                else:
+                    # Minimum of the late starts of all dependent tasks
+                    lf = min(late_start[dep] for dep in dependent_tasks)
+                    
+                late_finish[tid] = lf
+                late_start[tid] = lf - tasks[tid].current_duration()
+                
+                # Check critical path condition: Early Start == Late Start (Float == 0)
+                if tasks[tid].start_day == late_start[tid]:
+                    tasks[tid].is_on_critical_path = True
+                    
+                resolved_backward.add(tid)
+                pending_backward.remove(tid)
+                progress_made = True
+                
+        if not progress_made and pending_backward:
+             break
+             
+    return project_end_day

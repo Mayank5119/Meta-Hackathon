@@ -1,25 +1,21 @@
+# Use official Python 3.11 slim image as the base
 FROM python:3.11-slim
 
+# Set working directory
 WORKDIR /app
 
-# Install system deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy and install Python deps first (cache layer)
+# Copy requirements first to leverage Docker cache
 COPY requirements.txt .
+
+# Install dependencies
+# (We use --no-cache-dir to keep the image size small)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application source
+# Copy the rest of the application code into the container
 COPY . .
 
-# Expose FastAPI port (HF Spaces expects 7860)
-EXPOSE 7860
+# Expose the port the FastAPI server runs on
+EXPOSE 7060
 
-# Health check — HF Spaces pings /
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:7860/')"
-
-# Start FastAPI server
-CMD ["uvicorn", "api.server:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "1"]
+# Command to run the server
+CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7060"]

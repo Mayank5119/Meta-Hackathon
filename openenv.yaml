@@ -1,18 +1,16 @@
-name: construction-superintendent
+name: "construction-superintendent"
 version: "1.0.0"
 description: >
   An OpenEnv-compliant environment where an AI agent acts as an autonomous
   construction site superintendent. The agent manages a real project schedule
-  modelled as a directed acyclic graph (DAG) of tasks, responds to disruptions
+  represented as a directed acyclic graph (DAG) of tasks, responds to disruptions
   (weather delays, material shortages, equipment failures, labour shortages),
   and must minimise total project delay and cost overrun.
 
 domain: scheduling
 tags:
-  - openenv
   - construction
   - scheduling
-  - real-world
   - resource-management
   - multi-task
 
@@ -72,6 +70,7 @@ observation_space:
         affected_task_id: string
         remaining_delay_days: integer
         description: string
+        resolved: boolean
     metrics:
       type: object
       fields:
@@ -81,8 +80,8 @@ observation_space:
         budget_total: float
         budget_used: float
         budget_remaining: float
-        tasks_completed: integer
         tasks_total: integer
+        tasks_completed: integer
         disruptions_encountered: integer
         disruptions_resolved: integer
 
@@ -97,12 +96,11 @@ action_space:
 
 reward:
   type: dense
-  range: [-100, 100]
   description: >
     Dense reward signal at each step.
-    Positive: task completion (+5), disruption resolution (+3), project completion (+50),
+    Positive: Task completion (+5), disruption resolution (+3), project completion (+50),
               on-time project bonus (+30).
-    Negative: delay penalty (-2 per day), cost penalty (-0.5 per $1k overrun),
+    Negative: Delay penalty (-2 per day), cost penalty (-0.5 per $1k overrun),
               budget overrun (-20), invalid action (-1).
 
 episode:
@@ -112,12 +110,11 @@ episode:
   max_steps_hard: 35
 
 endpoints:
-  health:   "GET  /"
-  reset:    "POST /reset"
-  step:     "POST /step"
-  state:    "GET  /state"
-  grade:    "POST /grade"
-  tasks:    "GET  /tasks"
+  health: "GET /"
+  reset: "POST /reset"
+  step: "POST /step"
+  state: "GET /state"
+  tasks: "GET /tasks"
 
 inference:
   script: inference.py
@@ -125,12 +122,12 @@ inference:
     API_BASE_URL: "LLM API endpoint"
     MODEL_NAME: "Model identifier"
     HF_TOKEN: "Hugging Face / API key"
+  hardware: "vCPUx2, memory=8gb"
   runtime_limit_minutes: 20
-  hardware: "vcpu=2, memory=8gb"
 
 authors:
   - name: "Team Cockroach"
     members:
       - "Mayank Vaishya"
       - "Harsh Pundir"
-      - "Dhruv"
+      - "Dhruvv"

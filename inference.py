@@ -1,24 +1,17 @@
-"""
-Baseline Inference Script — Construction Superintendent OpenEnv
-===============================================================
-MANDATORY configuration (set as environment variables):
-  API_BASE_URL  — LLM API endpoint  (e.g. https://router.huggingface.co/v1)
-  MODEL_NAME    — Model identifier   (e.g. meta-llama/Llama-3.1-8B-Instruct)
-  HF_TOKEN      — Hugging Face / API key
-
-Usage:
-  python inference.py [--task_level easy|medium|hard] [--max_steps 20] [--seed 42]
-
-The script runs ALL three task levels in sequence and prints a score table.
-"""
-
-from __future__ import annotations
+# Baseline Inference script - Construction Superintendent OpenEnv
+# MANDATORY stdout format (one episode block per task level):
+#
+# [START] task=easy env=construction-superintendent model=my-model
+# [STEP] step=1 action={"action_type": "noop"} reward=0.0 done=False error=null
+# ...
+# [END] success=True steps=15 score=0.78 rewards=[...]
+# JSON_SCORES: {"easy": 0.78}
 
 import argparse
 import json
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
@@ -26,96 +19,130 @@ from env.construction_env import ConstructionEnv
 from env.models import Action, ActionType, Observation
 from graders.grader import grade
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 # Configuration
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
-API_KEY = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY", "")
+API_KEY = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY") or ""
 MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
-MAX_STEPS = int(os.environ.get("MAX_STEPS", "20"))
+BENCHMARK = "construction-superintendent"
 TEMPERATURE = 0.0
 MAX_TOKENS = 512
+SUCCESS_SCORE_THRESHOLD = 0.50 # grader score in [0, 1]
 
 if not API_KEY:
-    print("[WARNING] HF_TOKEN / API_KEY not set. LLM calls will fail.")
+    print("[WARNING] HF_TOKEN / API_KEY not set. LLM calls will fail.", file=sys.stderr)
 
 client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY or "dummy")
 
+# =============================================================================
+# Mandatory stdout logging helpers
+# =============================================================================
 
-# ---------------------------------------------------------------------------
+def log_start(task: str, env_name: str, model: str):
+    print(f"[START] task={task} env={env_name} model={model}", flush=True)
+
+def log_step(
+    step: int,
+    action_str: str,
+    reward: float,
+    done: bool,
+    error: Optional[str] = None
+):
+    error_val = error if error else "null"
+    print(
+        f"[STEP] step={step} action={action_str} reward={reward:.2f} "
+        f"done={str(done).lower()} error={error_val}",
+        flush=True,
+    )
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    rewards_str = ",".join([f"{r:.2f}" for r in rewards])
+    print(
+        f"[END] success={str(success).lower()} steps={steps} "
+        f"score={score:.2f} rewards=[{rewards_str}]",
+        flush=True,
+    )
+
+def action_to_str(action: Action) -> str:
+    """Compact single-line JSON for the [STEP] action field."""
+    return json.dumps(
+        {k: v for k, v in action.dict().items() if v is not None},
+        separators=(',', ':')
+    )
+
+# =============================================================================
 # Prompt engineering
-# ---------------------------------------------------------------------------
+# =============================================================================
 
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT = """
 You are an expert construction project manager (Site Superintendent).
 You manage a construction schedule and must respond to disruptions to minimise delays and cost.
 
 At each step you receive the current project state and must choose ONE action.
 
 AVAILABLE ACTIONS:
-1. expedite_task   — Add extra resources to a task to finish it faster (costs money)
-   JSON: {"action_type": "expedite_task", "task_id": "T3", "days": 2}
-   (days = number of extra resource units to add, 1–5)
+1. expedite_task - Add extra resources to a task to finish it faster (costs money)
+   JSON: {"action_type": "expedite_task", "task_id": "T1", "days": 2}
+   (days = number of extra resource units to add, 1-5)
 
-2. delay_task      — Accept a delay on a task (absorbs the disruption)
+2. delay_task - Accept a delay on a task (absorbs the disruption cheaply)
    JSON: {"action_type": "delay_task", "task_id": "T3", "days": 3}
 
-3. reassign_resources — Move 1 resource from one task to another
-   JSON: {"action_type": "reassign_resources", "task_id": "T3", "target_task_id": "T5"}
+3. reassign_resources - Move 1 resource from one task to another
+   JSON: {"action_type": "reassign_resources", "task_id": "T2", "target_task_id": "T5"}
 
-4. noop            — Do nothing, let the simulation advance
+4. noop - Do nothing, let the simulation advance
    JSON: {"action_type": "noop"}
 
 DECISION RULES (apply in order):
-- If a disruption hits a CRITICAL PATH task → expedite_task (fix it fast)
-- If a disruption hits a NON-CRITICAL task → delay_task (cheaper to absorb)
-- If a task is blocking the critical path → reassign_resources from non-critical tasks
-- If no disruptions are active → noop
+- If a disruption hits a CRITICAL PATH task -> expedite_task (fix it fast)
+- If a disruption hits a NON-CRITICAL task -> delay_task (cheaper to absorb)
+- If a task is blocking the critical path -> reassign_resources from non-critical tasks
+- If no disruptions are active -> noop
 
 Respond with ONLY valid JSON matching one of the action formats above.
-No explanation, no markdown — just the JSON object.
+No explanation, no markdown - just the raw JSON object on a single line.
 """
-
 
 def build_user_message(obs: Observation) -> str:
     m = obs.metrics
     lines = [
-        f"=== Day {obs.current_day} | Step {obs.episode_step} | Task: {obs.task_level} ===",
+        f"--- Day {obs.current_day} | Step {obs.episode_step} | {obs.task_level} ---",
         f"Project end: original day {m.original_end_day}, projected day {m.current_projected_end_day} (delay: {m.delay_days}d)",
-        f"Budget: ${m.budget_used:,.0f} used / ${m.budget_total:,.0f} total",
+        f"Budget: ${m.budget_used:.0f} used / ${m.budget_total:.0f} total",
         f"Tasks: {m.tasks_completed}/{m.tasks_total} complete",
         "",
-        "TASKS:",
+        "TASKS:"
     ]
     for t in obs.tasks:
         cp = " [CRITICAL PATH]" if t.is_on_critical_path else ""
         lines.append(
-            f"  {t.id} {t.name}: {t.status.value}, start={t.current_start_day}, end={t.current_end_day}, "
-            f"delay={t.delay_from_original}d, resources={t.resources}{cp}"
+            f"- {t.id} ({t.name}){cp}: {t.status.value}, "
+            f"days: {t.current_start_day}-{t.current_end_day}, "
+            f"delay: {t.delay_from_original}d, resources: {t.resources}"
         )
-
     if obs.active_disruptions:
-        lines.append("")
-        lines.append("ACTIVE DISRUPTIONS:")
+        lines.append("\nACTIVE DISRUPTIONS:")
         for d in obs.active_disruptions:
-            lines.append(f"  {d.id} [{d.type.value}] affects {d.affected_task_id}: {d.description} (+{d.remaining_delay_days}d)")
-
-    lines.append("")
-    lines.append("Choose ONE action (respond with JSON only):")
+            lines.append(
+                f"- [{d.id}] {d.type.value} affects {d.affected_task_id}: "
+                f"{d.description} (+{d.remaining_delay_days}d)"
+            )
+    lines.append("\nChoose ONE action (respond with JSON only):")
     return "\n".join(lines)
 
-
-# ---------------------------------------------------------------------------
-# LLM action selection
-# ---------------------------------------------------------------------------
-
-def llm_select_action(obs: Observation) -> Action:
-    """Call the LLM with the current observation and parse its action response."""
+def llm_select_action(obs: Observation) -> Tuple[Action, Optional[str]]:
+    """
+    Call the LLM with the current observation and parse its action.
+    Returns (action, error_string_or_none).
+    On any failure, falls back to noop and returns the error string.
+    """
+    raw = ""
     user_msg = build_user_message(obs)
-
     try:
-        response = client.chat.completions.create(
+        resp = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -124,107 +151,114 @@ def llm_select_action(obs: Observation) -> Action:
             temperature=TEMPERATURE,
             max_tokens=MAX_TOKENS,
         )
-        raw = response.choices[0].message.content.strip()
+        raw = resp.choices[0].message.content or ""
+        raw = raw.strip()
+        
         # Strip markdown code fences if present
+        if raw.startswith("```json"):
+            raw = raw[7:]
         if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        action_dict = json.loads(raw)
-        return Action(**action_dict)
-    except Exception as e:
-        print(f"  [LLM error] {e} — falling back to noop")
-        return Action(action_type=ActionType.NOOP)
+            raw = raw[3:]
+        if raw.endswith("```"):
+            raw = raw[:-3]
+        raw = raw.strip()
+        
+        return Action(**json.loads(raw)), None
+    except Exception as exc:
+        err = str(exc)
+        print(f"[WARN] LLM parse error: {err} | Raw: {raw}", file=sys.stderr)
+        return Action(action_type=ActionType.NOOP), err
 
-
-# ---------------------------------------------------------------------------
+# =============================================================================
 # Episode runner
-# ---------------------------------------------------------------------------
+# =============================================================================
 
-def run_episode(task_level: str, seed: Optional[int] = None, verbose: bool = True) -> Dict[str, Any]:
-    """Run one full episode and return results dict."""
+def run_episode(task_level: str, seed: Optional[int]) -> float:
+    """
+    Run one full episode for the given task level.
+    Emits the mandatory [START] / [STEP] / [END] lines to stdout.
+    Returns the grader score in [0.0, 1.0].
+    """
     env = ConstructionEnv()
     obs = env.reset(task_level=task_level, seed=seed)
-
-    total_reward = 0.0
-    step_count = 0
+    
+    log_start(task_level, env_name=BENCHMARK, model=MODEL_NAME)
+    
+    steps_taken = 0
+    rewards: List[float] = []
+    score = 0.0
+    success = False
+    
     done = False
+    
+    try:
+        while not done:
+            action, parse_error = llm_select_action(obs)
+            action_str = action_to_str(action)
+            
+            obs, reward, done, info = env.step(action)
+            rewards.append(reward)
+            
+            # Detect env-level invalid actions (separate from LLM parse errors)
+            step_error = parse_error
+            if not step_error and info.get("reward_breakdown", {}).get("invalid_action_penalty", 0) < 0:
+                step_error = f"invalid_action: {action.action_type}"
+                
+            log_step(
+                step=steps_taken,
+                action_str=action_str,
+                reward=reward,
+                done=done,
+                error=step_error,
+            )
+            steps_taken += 1
+            
+        # Grade the completed episode
+        final_state = env.state()
+        result = grade(task_level, final_state)
+        score = result.score
+        success = score >= SUCCESS_SCORE_THRESHOLD
+            
+    except Exception as exc:
+        err_msg = str(exc)
+        print(f"[ERROR] Episode exception: {err_msg}", file=sys.stderr)
+        
+    finally:
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+        
+    return score
 
-    if verbose:
-        print(f"\n{'='*60}")
-        print(f"EPISODE: {task_level.upper()} | Seed: {seed}")
-        print(f"Original project end: day {obs.metrics.original_end_day}")
-        print(f"Budget: ${obs.metrics.budget_total:,.0f}")
-        print(f"{'='*60}")
-
-    while not done:
-        action = llm_select_action(obs)
-        obs, reward, done, info = env.step(action)
-        total_reward += reward
-        step_count += 1
-
-        if verbose:
-            events = info.get("events", [])
-            print(f"\nStep {step_count}: action={action.action_type} task={action.task_id or '-'}")
-            for evt in events:
-                print(f"  EVENT: {evt}")
-            print(f"  Reward: {reward:.2f} | Total: {total_reward:.2f}")
-            print(f"  Day: {obs.current_day} | Delay: {obs.metrics.delay_days}d | Budget used: ${obs.metrics.budget_used:,.0f}")
-
-    final_state = env.state()
-    result = grade(task_level, final_state)
-
-    if verbose:
-        print(f"\n{'='*60}")
-        print(f"EPISODE COMPLETE — {task_level.upper()}")
-        print(f"Score: {result.score:.4f} ({'PASS' if result.passed else 'FAIL'})")
-        print(f"Explanation: {result.explanation}")
-        print(f"{'='*60}")
-
-    return {
-        "task_level": task_level,
-        "total_reward": round(total_reward, 2),
-        "steps": step_count,
-        "grade": result.dict(),
-    }
-
-
-# ---------------------------------------------------------------------------
+# =============================================================================
 # Main
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Construction Superintendent OpenEnv baseline inference.")
-    parser.add_argument("--task_level", choices=["easy", "medium", "hard", "all"], default="all")
-    parser.add_argument("--max_steps", type=int, default=MAX_STEPS)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--quiet", action="store_true")
+    parser = argparse.ArgumentParser(
+        description="Construction Superintendent OpenEnv - baseline inference script."
+    )
+    parser.add_argument(
+        "--task_level",
+        type=str,
+        default="easy",
+        help="Task difficulty level to run (default: all three in sequence).",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="RNG seed for reproducibility (default: 42).",
+    )
     args = parser.parse_args()
-
+    
     levels = ["easy", "medium", "hard"] if args.task_level == "all" else [args.task_level]
-    results: List[Dict] = []
-
+    scores: Dict[str, float] = {}
+    
     for level in levels:
-        result = run_episode(task_level=level, seed=args.seed, verbose=not args.quiet)
-        results.append(result)
-
-    # Summary table
-    print("\n" + "="*60)
-    print("BASELINE SCORES SUMMARY")
-    print("="*60)
-    print(f"{'Task':<10} {'Score':>8} {'Pass':>6} {'Reward':>10} {'Steps':>6}")
-    print("-"*60)
-    for r in results:
-        g = r["grade"]
-        print(
-            f"{r['task_level']:<10} {g['score']:>8.4f} {str(g['passed']):>6} "
-            f"{r['total_reward']:>10.2f} {r['steps']:>6}"
-        )
-    print("="*60)
-
-    # Machine-readable output
-    print("\nJSON_SCORES:", json.dumps({r["task_level"]: r["grade"]["score"] for r in results}))
-
+        score = run_episode(task_level=level, seed=args.seed)
+        scores[level] = score
+        
+    # Machine-readable summary line for CI / eval pipelines
+    print(f"JSON_SCORES: {json.dumps(scores)}", flush=True)
 
 if __name__ == "__main__":
     main()

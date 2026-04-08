@@ -1,6 +1,6 @@
 """
 Typed Pydantic models for the Construction Superintendent OpenEnv environment.
-All OpenEnv-required types: Action, Observation, Reward, StepResult.
+Defines types: Action, Observation, Reward, StepResult.
 """
 
 from __future__ import annotations
@@ -10,10 +10,9 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-
-# ---------------------------------------------------------------------------
+# =============================================================================
 # Enumerations
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 class TaskStatus(str, Enum):
     PENDING = "pending"
@@ -22,24 +21,21 @@ class TaskStatus(str, Enum):
     DISRUPTED = "disrupted"
     BLOCKED = "blocked"
 
-
 class DisruptionType(str, Enum):
     WEATHER = "weather"
     MATERIAL_SHORTAGE = "material_shortage"
     EQUIPMENT_FAILURE = "equipment_failure"
     LABOR_SHORTAGE = "labor_shortage"
 
-
 class ActionType(str, Enum):
-    EXPEDITE_TASK = "expedite_task"         # add resources → finish faster, costs money
-    DELAY_TASK = "delay_task"               # accept delay, push task start forward
-    REASSIGN_RESOURCES = "reassign_resources"  # move workers from one task to another
-    NOOP = "noop"                           # do nothing, advance to next event
+    EXPEDITE_TASK = "expedite_task"       # add resources = finish faster, costs money
+    DELAY_TASK = "delay_task"             # accept delay, push task start forward
+    REASSIGN_RESOURCES = "reassign_resources" # move workers from one task to another
+    NOOP = "noop"                         # do nothing, advance to next event
 
-
-# ---------------------------------------------------------------------------
+# =============================================================================
 # Action
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 class Action(BaseModel):
     """Agent action submitted to step()."""
@@ -60,17 +56,15 @@ class Action(BaseModel):
     class Config:
         use_enum_values = True
 
-
-# ---------------------------------------------------------------------------
+# =============================================================================
 # Observation sub-models
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 class TaskObservation(BaseModel):
     id: str
     name: str
     original_duration: int
     current_duration: int
-    original_start_day: int
     current_start_day: int
     current_end_day: int
     status: TaskStatus
@@ -81,7 +75,6 @@ class TaskObservation(BaseModel):
     cost_per_day: float
     progress_pct: float = Field(0.0, description="Completion percentage 0-100.")
 
-
 class DisruptionObservation(BaseModel):
     id: str
     type: DisruptionType
@@ -91,7 +84,6 @@ class DisruptionObservation(BaseModel):
     description: str
     resolved: bool = False
 
-
 class ProjectMetrics(BaseModel):
     original_end_day: int
     current_projected_end_day: int
@@ -99,12 +91,11 @@ class ProjectMetrics(BaseModel):
     budget_total: float
     budget_used: float
     budget_remaining: float
-    tasks_completed: int
     tasks_total: int
+    tasks_completed: int
     disruptions_encountered: int
     disruptions_resolved: int
     on_critical_path_delayed: bool
-
 
 class Observation(BaseModel):
     """Full environment observation returned by reset() and step()."""
@@ -120,10 +111,9 @@ class Observation(BaseModel):
     )
     terminal_message: Optional[str] = None
 
-
-# ---------------------------------------------------------------------------
+# =============================================================================
 # Reward
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 class Reward(BaseModel):
     """Structured reward breakdown (returned in info)."""
@@ -135,10 +125,9 @@ class Reward(BaseModel):
     disruption_resolution_bonus: float
     explanation: str
 
-
-# ---------------------------------------------------------------------------
-# Step result  (the canonical OpenEnv return)
-# ---------------------------------------------------------------------------
+# =============================================================================
+# Step result (the canonical OpenEnv return)
+# =============================================================================
 
 class StepResult(BaseModel):
     observation: Observation
@@ -146,19 +135,17 @@ class StepResult(BaseModel):
     done: bool
     info: Dict[str, Any]
 
-
-# ---------------------------------------------------------------------------
+# =============================================================================
 # Reset / State
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 class ResetRequest(BaseModel):
     task_level: str = Field("easy", description="easy | medium | hard")
     seed: Optional[int] = Field(None, description="RNG seed for reproducibility.")
 
-
 class GradeResult(BaseModel):
     task_level: str
-    score: float = Field(description="Normalised score 0.0–1.0.")
+    score: float = Field(description="Normalised score 0.0-1.0")
     breakdown: Dict[str, float]
     passed: bool
     explanation: str

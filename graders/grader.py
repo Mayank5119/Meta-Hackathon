@@ -62,7 +62,11 @@ def grade_easy(state: Dict[str, Any]) -> GradeResult:
     # Disruption handling
     breakdown["disruption_handling"] = 0.10 if resolved == 1 else 0.0
 
-    score = round(min(1.0, sum(breakdown.values())), 4)
+    quality_index = state.get("metrics", {}).get("quality_index", 1.0)
+
+    # Multiply performance by quality to ensure the score is naturally < 1.0
+    raw_performance = sum(breakdown.values())
+    score = round(max(0.01, min(0.9999, raw_performance * quality_index)), 4)
     passed = score >= 0.60
 
     return GradeResult(
@@ -133,7 +137,10 @@ def grade_medium(state: Dict[str, Any]) -> GradeResult:
     else:
         breakdown["budget"] = 0.0
 
-    score = round(min(1.0, sum(breakdown.values())), 4)
+    quality_index = state.get("metrics", {}).get("quality_index", 1.0)
+
+    raw_performance = sum(breakdown.values())
+    score = round(max(0.01, min(0.9999, raw_performance * quality_index)), 4)
     passed = score >= 0.55
 
     return GradeResult(
@@ -204,7 +211,10 @@ def grade_hard(state: Dict[str, Any]) -> GradeResult:
     else:
         breakdown["budget"] = 0.0
 
-    score = round(min(1.0, sum(breakdown.values())), 4)
+    quality_index = state.get("metrics", {}).get("quality_index", 1.0)
+
+    raw_performance = sum(breakdown.values())
+    score = round(max(0.01, min(0.9999, raw_performance * quality_index)), 4)
     passed = score >= 0.50
 
     return GradeResult(

@@ -96,6 +96,7 @@ class ProjectMetrics(BaseModel):
     disruptions_encountered: int
     disruptions_resolved: int
     on_critical_path_delayed: bool
+    quality_index: float = Field(1.0, description="Project quality 0.0-1.0, reduced by rushing.")
 
 class Observation(BaseModel):
     """Full environment observation returned by reset() and step()."""

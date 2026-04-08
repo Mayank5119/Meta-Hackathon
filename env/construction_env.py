@@ -83,6 +83,7 @@ class ConstructionEnv:
         
         self._session_id: str = str(uuid.uuid4())
         self._history: List[Dict] = []
+        self.quality_index = 1.0
         
     # =========================================================================
     # OpenEnv API
@@ -92,7 +93,7 @@ class ConstructionEnv:
         """Reset environment and return initial observation."""
         if task_level not in PROJECT_FACTORIES:
             raise ValueError(f"Unknown task_level '{task_level}'. Choose: easy | medium | hard")
-            
+        self.quality_score = 1.0   
         self._task_level = task_level
         self._seed = seed
         self._session_id = str(uuid.uuid4())
@@ -250,6 +251,15 @@ class ConstructionEnv:
         return False, f"Unknown action type: {at}"
 
     def _do_expedite(self, action: Action, reward_components: Dict, info: Dict) -> Tuple[bool, str]:
+        # 1. APPLY THE QUALITY PENALTY
+        # Every day rushed reduces quality by 0.5%
+        days_to_expedite = action.days if action.days else 0
+        self.quality_index -= (0.005 * days_to_expedite)
+
+        # 2. (Optional) ADD A NEGATIVE REWARD COMPONENT
+        # This helps the agent "feel" the penalty during training
+        reward_components["quality_penalty"] = -0.1 * days_to_expedite
+
         tid = action.task_id
         if not tid in self._tasks:
             return False, f"Task '{tid}' not found."
@@ -454,7 +464,8 @@ class ConstructionEnv:
             on_critical_path_delayed=any(
                 t.is_on_critical_path and t.delay_days > 0 
                 for t in self._tasks.values()
-            )
+            ),
+            quality_index=self.quality_index
         )
         
         return Observation(

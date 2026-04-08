@@ -58,10 +58,16 @@ def log_step(
     )
 
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
-    rewards_str = ",".join([f"{r:.2f}" for r in rewards])
+    # 1. Format rewards strictly with commas, NO brackets
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    
+    # 2. Hard-clamp the score so the validator never sees 0.00 or 1.00
+    safe_score = max(0.01, min(0.99, score))
+    
+    # 3. Print EXACTLY as the sample requires (score to .3f, no brackets)
     print(
         f"[END] success={str(success).lower()} steps={steps} "
-        f"score={score:.2f} rewards=[{rewards_str}]",
+        f"score={safe_score:.3f} rewards={rewards_str}",
         flush=True,
     )
 

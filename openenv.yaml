@@ -14,8 +14,10 @@ tags:
   - resource-management
   - multi-task
 
-task_levels:
-  - id: easy
+# --- CRITICAL FIX: The validator specifically looks for 'tasks', 'name', and 'grader' ---
+tasks:
+  - name: easy
+    grader: grader.py
     description: "5-task linear residential build, 1 weather disruption. Baseline score for simple heuristic: ~0.70"
     difficulty: easy
     max_steps: 15
@@ -23,7 +25,8 @@ task_levels:
     expected_score_heuristic: 0.70
     expected_score_frontier: 0.90
 
-  - id: medium
+  - name: medium
+    grader: grader.py
     description: "8-task commercial build, parallel MEP tracks, 3 disruptions. Requires prioritisation."
     difficulty: medium
     max_steps: 25
@@ -31,7 +34,8 @@ task_levels:
     expected_score_heuristic: 0.55
     expected_score_frontier: 0.80
 
-  - id: hard
+  - name: hard
+    grader: grader.py
     description: "10-task complex mixed-use project, 5 disruptions, tight budget. Challenges frontier models."
     difficulty: hard
     max_steps: 35

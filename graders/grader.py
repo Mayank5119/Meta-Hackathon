@@ -66,8 +66,9 @@ def grade_easy(state: Dict[str, Any]) -> GradeResult:
 
     # Multiply performance by quality to ensure the score is naturally < 1.0
     raw_performance = sum(breakdown.values())
-    score = round(max(0.01, min(0.9999, raw_performance * quality_index)), 4)
-    passed = score >= 0.60
+    # --- FIX: Clamp strictly to 0.99 and round to 3 decimal places ---
+    score = round(max(0.01, min(0.99, raw_performance * quality_index)), 3)
+    passed = score >= 0.60 # (or 0.55 / 0.50 depending on the level)
 
     return GradeResult(
         task_level="easy",
@@ -140,8 +141,9 @@ def grade_medium(state: Dict[str, Any]) -> GradeResult:
     quality_index = state.get("metrics", {}).get("quality_index", 1.0)
 
     raw_performance = sum(breakdown.values())
-    score = round(max(0.01, min(0.9999, raw_performance * quality_index)), 4)
-    passed = score >= 0.55
+    # --- FIX: Clamp strictly to 0.99 and round to 3 decimal places ---
+    score = round(max(0.01, min(0.99, raw_performance * quality_index)), 3)
+    passed = score >= 0.60 # (or 0.55 / 0.50 depending on the level)
 
     return GradeResult(
         task_level="medium",
@@ -214,8 +216,9 @@ def grade_hard(state: Dict[str, Any]) -> GradeResult:
     quality_index = state.get("metrics", {}).get("quality_index", 1.0)
 
     raw_performance = sum(breakdown.values())
-    score = round(max(0.01, min(0.9999, raw_performance * quality_index)), 4)
-    passed = score >= 0.50
+    # --- FIX: Clamp strictly to 0.99 and round to 3 decimal places ---
+    score = round(max(0.01, min(0.99, raw_performance * quality_index)), 3)
+    passed = score >= 0.60 # (or 0.55 / 0.50 depending on the level)
 
     return GradeResult(
         task_level="hard",

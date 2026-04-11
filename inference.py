@@ -23,18 +23,17 @@ from graders.grader import grade
 # Configuration
 # =============================================================================
 
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
-API_KEY = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY") or ""
+# Use strict dictionary lookups. This will fail fast if the validator 
+# doesn't inject them, rather than silently burning your personal credits.
+API_BASE_URL = os.environ["API_BASE_URL"] 
+API_KEY = os.environ["HF_TOKEN"]
 MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
 BENCHMARK = "construction-superintendent"
 TEMPERATURE = 0.0
 MAX_TOKENS = 512
-SUCCESS_SCORE_THRESHOLD = 0.50 # grader score in [0, 1]
+SUCCESS_SCORE_THRESHOLD = 0.50 
 
-if not API_KEY:
-    print("[WARNING] HF_TOKEN / API_KEY not set. LLM calls will fail.", file=sys.stderr)
-
-client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY or "dummy")
+client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
 # =============================================================================
 # Mandatory stdout logging helpers
@@ -202,7 +201,13 @@ def run_episode(task_level: str, seed: Optional[int]) -> float:
             action, parse_error = llm_select_action(obs)
             action_str = action_to_str(action)
             
-            obs, reward, done, info = env.step(action)
+            # Capture the raw reward from your environment
+            obs, raw_reward, done, info = env.step(action)
+            
+            # --- FIX: Normalize reward to strictly (0.01, 0.99) ---
+            # Assuming max positive is ~80 and max negative is ~ -50
+            reward = max(0.01, min(0.99, (raw_reward + 100.0) / 200.0))
+            
             rewards.append(reward)
             
             # Detect env-level invalid actions (separate from LLM parse errors)
@@ -213,7 +218,7 @@ def run_episode(task_level: str, seed: Optional[int]) -> float:
             log_step(
                 step=steps_taken,
                 action_str=action_str,
-                reward=reward,
+                reward=reward,  # <-- Logging the normalized reward
                 done=done,
                 error=step_error,
             )

@@ -244,14 +244,19 @@ def run_episode(task_level: str, seed: Optional[int]) -> float:
 # =============================================================================
 
 def main() -> None:
+    # 1. Check if the validator is requesting a specific task via Env Vars
+    # (Usually formatted as BENCHMARK_NAME_TASK)
+    env_task = os.environ.get("CONSTRUCTION_SUPERINTENDENT_TASK") or os.environ.get("TASK_NAME")
+    
     parser = argparse.ArgumentParser(
         description="Construction Superintendent OpenEnv - baseline inference script."
     )
+    # 2. CHANGE DEFAULT FROM "easy" TO "all"
     parser.add_argument(
         "--task_level",
         type=str,
-        default="easy",
-        help="Task difficulty level to run (default: all three in sequence).",
+        default="all",  
+        help="Task difficulty level to run (default: all).",
     )
     parser.add_argument(
         "--seed",
@@ -261,14 +266,17 @@ def main() -> None:
     )
     args = parser.parse_args()
     
-    levels = ["easy", "medium", "hard"] if args.task_level == "all" else [args.task_level]
+    # Decide which tasks to run
+    target_task = env_task if env_task else args.task_level
+    levels = ["easy", "medium", "hard"] if target_task == "all" else [target_task]
+    
     scores: Dict[str, float] = {}
     
     for level in levels:
         score = run_episode(task_level=level, seed=args.seed)
-        scores[level] = score
+        scores[level] = max(0.01, min(0.99, score)) # Safety clamp
         
-    # Machine-readable summary line for CI / eval pipelines
+    # Machine-readable summary line
     print(f"JSON_SCORES: {json.dumps(scores)}", flush=True)
 
 if __name__ == "__main__":
